@@ -1,0 +1,21 @@
+[
+  {
+    "id": 1765615587324,
+    "rating": "5",
+    "rating_message": "nice website",
+    "timestamp": "2025-12-13T08:46:27.324Z"
+  },
+  {
+    "id": 1765615726629,
+    "rating": "4",
+    "rating_message": "website",
+    "timestamp": "2025-12-13T08:48:46.629Z"
+  },
+  {
+    "id": 1765617553145,
+    "username": "kundan",
+    "rating": 4,
+    "rating_message": "website",
+    "timestamp": "2025-12-13T09:19:13.145Z"
+  }
+]
