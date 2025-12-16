@@ -1,8 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const Brevo = require('@getbrevo/brevo');
-const fs = require('fs');
-const path = require('path');
+const pool = require('./db')
 const cors = require('cors');
 
 const app = express();
@@ -13,6 +12,7 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 
 // Brevo API Setup
 let apiInstance = new Brevo.TransactionalEmailsApi();
@@ -25,7 +25,7 @@ apiInstance.setApiKey(
 // Function to send email
 async function sendEmail(toEmail, subject, htmlContent) {
   try {
-    console.log(`📧 Sending email FROM: ${process.env.BREVO_EMAIL} TO: ${toEmail}`);
+    // console.log(`📧 Sending email FROM: ${process.env.BREVO_EMAIL} TO: ${toEmail}`);
     
     const sendSmtpEmail = new Brevo.SendSmtpEmail();
     sendSmtpEmail.subject = subject;
@@ -34,21 +34,13 @@ async function sendEmail(toEmail, subject, htmlContent) {
     sendSmtpEmail.to = [{ email: toEmail }];
 
     const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
-    console.log("✅ Email sent successfully");
-    console.log(`✅ Message ID: ${data.body.messageId}`);
+    // console.log("✅ Email sent successfully");
+    // console.log(`✅ Message ID: ${data.body.messageId}`);
     return data;
   } catch (error) {
     console.error("❌ Error sending email:", error);
     throw error;
   }
-}
-
-// Path for ratings file
-const ratingsFile = path.join(__dirname, 'ratings.json');
-
-// Ensure ratings file exists
-if (!fs.existsSync(ratingsFile)) {
-  fs.writeFileSync(ratingsFile, JSON.stringify([], null, 2));
 }
 
 // POST route for sending email
@@ -94,13 +86,13 @@ app.post('/sendmail', async (req, res) => {
       </html>
     `;
 
-    console.log(`📨 Email from: ${name} (${email})`);
-    console.log(`📨 Subject: ${subject}`);
-    console.log(`📨 Email body:\n${htmlContent}`);
+    // console.log(`📨 Email from: ${name} (${email})`);
+    // console.log(`📨 Subject: ${subject}`);
+    // console.log(`📨 Email body:\n${htmlContent}`);
 
     // Send email to sanketuphade77@gmail.com
     sendEmail('sanketuphade77@gmail.com', subject, htmlContent).then((result) => {
-      console.log("✅ Email sent! Response:", result);
+      // console.log("✅ Email sent! Response:", result);
       console.log(`📬 Email successfully sent FROM: ${process.env.BREVO_EMAIL} TO: sanketuphade77@gmail.com`);
       res.status(200).json({ 
         success: true, 
@@ -126,14 +118,14 @@ app.post('/sendmail', async (req, res) => {
   }
 });
 
-// POST route for storing ratings
-app.post('/rate', (req, res) => {
+// POST route for storing ratings in PostgreSQL
+app.post('/rate', async (req, res) => {
   try {
-    const { rating, rating_message, username } = req.body;
+    const { username, rating, rating_message, ip_address, user_agent } = req.body;
     const ratingNumber = parseInt(rating);
 
-    // Validate inputs
-    if (!ratingNumber || !rating_message || !username) {
+    // Validate required inputs
+    if (!username || !ratingNumber || !rating_message) {
       return res.status(400).json({
         error: 'Username, rating and rating_message are required'
       });
@@ -145,26 +137,29 @@ app.post('/rate', (req, res) => {
       });
     }
 
-    // Read existing ratings (array)
-    let ratings = JSON.parse(fs.readFileSync(ratingsFile, 'utf8'));
+    // Insert into PostgreSQL
+    const query = `
+      INSERT INTO portfolio_feedback 
+        (username, rating, rating_message, ip_address, user_agent) 
+      VALUES 
+        ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
 
-    // New rating object
-    const newRating = {
-      id: Date.now(),
-      username: username.trim(),   // 👈 store user name
-      rating: ratingNumber,        // 👈 store as NUMBER
-      rating_message: rating_message.trim(),
-      timestamp: new Date().toISOString()
-    };
+    const values = [
+      username.trim(),
+      ratingNumber,
+      rating_message.trim(),
+      ip_address || null,
+      user_agent || null
+    ];
 
-    // Push & save
-    ratings.push(newRating);
-    fs.writeFileSync(ratingsFile, JSON.stringify(ratings, null, 2));
+    const result = await pool.query(query, values);
 
     res.status(200).json({
       success: true,
       message: 'Rating saved successfully',
-      data: newRating
+      data: result.rows[0]
     });
 
   } catch (error) {
@@ -176,11 +171,18 @@ app.post('/rate', (req, res) => {
   }
 });
 
-
 // GET route to retrieve all ratings
-app.get('/ratings', (req, res) => {
+app.get('/ratings', async (req, res) => {
   try {
-    const ratings = JSON.parse(fs.readFileSync(ratingsFile, 'utf8'));
+    const query = `
+      SELECT id, username, rating, rating_message, timestamp, created_at
+      FROM portfolio_feedback
+      WHERE is_published = true
+      ORDER BY timestamp DESC
+    `;
+
+    const result = await pool.query(query);
+    const ratings = result.rows;
 
     const total = ratings.reduce(
       (sum, item) => sum + Number(item.rating),
@@ -197,15 +199,18 @@ app.get('/ratings', (req, res) => {
       totalRatings: ratings.length
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch ratings' });
+    console.error('Fetch ratings error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch ratings',
+      details: error.message
+    });
   }
 });
-
-
 
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log('📧 Brevo email service configured');
+  console.log('🐘 PostgreSQL connection pool ready');
 });
